@@ -4,6 +4,7 @@ from datetime import datetime
 import pytest
 from async_generator import yield_, async_generator
 
+from gino.loader import ColumnLoader
 from .models import db, User, Team, Company
 
 pytestmark = pytest.mark.asyncio
@@ -47,6 +48,9 @@ async def test_model_load(user):
     assert isinstance(u, User)
     assert u.id is None
     assert u.nickname == user.nickname
+
+    with pytest.raises(TypeError):
+        await User.query.gino.load(User.load(123)).first()
 
 
 async def test_216_model_load_passive_partial(user):
@@ -142,6 +146,26 @@ async def test_adjacency_list(user):
         assert isinstance(u.team.parent, Team)
         assert u.team.parent.id == user.team.parent.id
         assert u.team.parent.name == user.team.parent.name
+
+
+async def test_adjanency_list_on_nested_load(user):
+    subquery = db.select(User).alias()
+    base_query = subquery.outerjoin(Team).select()
+
+    query = base_query.execution_options(loader=(User.load('id')))
+    u = await query.gino.first()
+    # Because here arrives team_id, not user_id, and replaces it
+    assert u.id is None
+
+    query = base_query.execution_options(loader=(User.load(*(map(subquery.corresponding_column, User)), team=Team)))
+    u = await query.gino.first()
+    assert u.id == user.id
+    assert u.realname == user.realname
+    assert u.nickname == user.nickname
+
+    assert isinstance(u.team, Team)
+    assert u.team.id == user.team.id
+    assert u.team.name == user.team.name
 
 
 async def test_adjacency_list_query_builder(user):
